@@ -1,4 +1,4 @@
-versionstring = "statsd-librato/1.3"
+versionstring = "statsd-librato/1.4"
 
 var dgram      = require('dgram')
   , sys        = require('util')
@@ -8,14 +8,22 @@ var dgram      = require('dgram')
   , async      = require('async')
   , url_parse  = require('url').parse
   , https      = require('https')
-  , http       = require('http')
-  , syslog     = require('node-syslog');
+  , http       = require('http');
 
-var logger = function(severity,message){
-  if(severity < syslog.LOG_NOTICE){
-    console.error(message);
-  } else {
-    console.log(message);
+var logger = function(message,severity){
+  switch(severity){
+    case "emerg":
+    case "alert":
+    case "crit":
+    case "err":
+      console.error(message);
+      break;
+    case "warn":
+      console.warn(message);
+      break;
+    default:
+      console.log(message);
+      break;
   }
 }
 
@@ -36,16 +44,48 @@ var globalstats = {
 };
 
 process.on('uncaughtException', function (err) {
-  logger(syslog.LOG_ERR, 'Caught exception: ' + err);
+  logger('Caught exception: ' + err,"err");
 });
 
 config.configFile(process.argv[2], function (config, oldConfig) {
   if (config.debug){
     sys.log('logging to stdout/err');
   } else {
-    syslog.init("node-syslog", syslog.LOG_PID | syslog.LOG_ODELAY, syslog.LOG_LOCAL0);
-    sys.log('logging to syslog');
-    logger = syslog.log;
+    try {
+      var syslog  = require('node-syslog');
+      sys.log('logging to syslog');
+      syslog.init("statsd-librato", syslog.LOG_PID | syslog.LOG_ODELAY, syslog.LOG_DAEMON);
+
+      logger = function(message,severity){
+        var severitycode = syslog.LOG_NOTICE;
+        switch(severity){
+          case "emerg":
+            severity = syslog.LOG_EMERG;
+            break;
+          case "alert":
+            severity = syslog.LOG_ALERT;
+            break;
+          case "crit":
+            severity = syslog.LOG_CRIT;
+            break;
+          case "err":
+            severity = syslog.LOG_ERR;
+            break;
+          case "warn":
+            severity = syslog.LOG_WARN;
+            break;
+          case "info":
+            severity = syslog.LOG_INFO;
+            break;
+          case "debug":
+            severity = syslog.LOG_DEBUG;
+            break;
+        }
+        syslog.log(severitycode,message);
+      };
+    } catch(err) {
+      sys.log('node-syslog not found, logging to stdout/err');
+    }
   }
 
   function graphServiceIs(name){
@@ -60,7 +100,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
   if (config.debug) {
     if (debugInt !== undefined) { clearInterval(debugInt); }
     debugInt = setInterval(function () { 
-      logger(syslog.LOG_INFO, "Counters:\n" + sys.inspect(counters) + "\nTimers:\n" + sys.inspect(timers));
+      logger("Counters:\n" + sys.inspect(counters) + "\nTimers:\n" + sys.inspect(timers), "info");
     }, config.debugInterval || 10000);
   }
 
@@ -69,12 +109,12 @@ config.configFile(process.argv[2], function (config, oldConfig) {
       var msgStr = msg.toString().replace(/^\s+|\s+$/g,"").replace(/\u0000/g, '');
       if (msgStr.length == 0) {
         if (config.debug) {
-          logger(syslog.LOG_DEBUG, 'No messsages.');
+          logger('No messsages.',"debug");
         }
         return;
       }
       if (config.dumpMessages) {
-        logger(syslog.LOG_INFO, 'Messages: ' + msgStr);
+        logger('Messages: ' + msgStr,"notice");
       }
       var bits = msgStr.split(':');
       var key = '';
@@ -88,7 +128,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
         var sampleRate = 1;
         var fields = bits[i].split("|");
         if (fields[1] === undefined) {
-            logger(syslog.LOG_ERR, 'Bad line: ' + fields);
+            logger('Bad line: ' + fields,"err");
             globalstats['messages']['bad_lines_seen']++;
             continue;
         }
@@ -113,7 +153,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
 
     server.on("listening", function () {
       var address = server.address();
-      logger(syslog.LOG_INFO, "statsd is running on " + address.address + ":" + address.port);
+      logger("statsd is running on " + address.address + ":" + address.port,"info");
       sys.log("server is up");
     });
 
@@ -336,7 +376,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
         if (e){
           globalstats['graphite']['last_exception'] = Math.round(new Date().getTime() / 1000);
           if(config.debug) {
-            logger(syslog.LOG_DEBUG, e);
+            logger(e,"debug");
           }
         }
       }
@@ -370,7 +410,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
                   submit_to_librato(stats_str,false);
                 }, Math.floor(flushInterval/2) + 100);
               } else {
-                logger(syslog.LOG_CRIT, "Error connecting to Librato!\n" + errdata);
+                logger("Error connecting to Librato!\n" + errdata,"crit");
               }
             });
           }
@@ -401,8 +441,8 @@ config.configFile(process.argv[2], function (config, oldConfig) {
             var stats_str = build_string(hash_postprocess(hash),hashtype)
             submissionq.push(function(){
               if (config.debug) {
-                logger(syslog.LOG_DEBUG, stats_str);
-                logger(syslog.LOG_DEBUG, stats_str.length);
+                logger(stats_str,"debug");
+                logger(stats_str.length,"debug");
               }
               submit_to_librato(stats_str,true);
             }, logerror);
@@ -410,15 +450,15 @@ config.configFile(process.argv[2], function (config, oldConfig) {
             var stats_str = build_string(hash_postprocess(hash),hashtype)
             submissionq.push(function(){
               if (config.debug) {
-                logger(syslog.LOG_DEBUG, stats_str);
-                logger(syslog.LOG_DEBUG, stats_str.length);
+                logger(stats_str,"debug");
+                logger(stats_str.length,"debug");
               }
 
               try {
                 var graphite = net.createConnection(config.graphitePort, config.graphiteHost);
                 graphite.addListener('error', function(connectionException){
                   if (config.debug) {
-                    logger(syslog.LOG_CRIT, connectionException);
+                    logger(connectionException,"crit");
                   }
                 });
                 graphite.on('connect', function() {
@@ -428,7 +468,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
                   });
               } catch(e){
                 if (config.debug) {
-                  logger(syslog.LOG_DEBUG, e);
+                  logger(e,"debug");
                 }
               }
             }, logerror);
