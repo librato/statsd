@@ -88,8 +88,18 @@ config.configFile(process.argv[2], function (config, oldConfig) {
     }
   }
 
-  function graphServiceIs(name){
-    return (config.graphService) && (config.graphService == name);
+  function graphServiceEnabled(name){
+    switch(name){
+      case "graphite":
+        return (config.graphiteHost && config.graphitePort);
+        break;
+      case "librato-metrics":
+        return (config.libratoUser && config.libratoApiKey);
+        break;
+      default:
+        throw ("'" + name + "' isn't a valid graphing service!");
+        break;
+    }
   }
 
   if (!config.debug && debugInt) {
@@ -277,7 +287,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
           stats["gauges"][key]["sum_squares"] = sumOfSquares;
           stats["gauges"][key]["min"] = min;
           stats["gauges"][key]["max"] = max;
-          if (!graphServiceIs("librato-metrics")){
+          if (graphServiceEnabled("graphite")){
             stats["gauges"][key]["upper_" + pctThreshold] = maxAtThreshold;
             stats["gauges"][key]["mean"] = mean;
           }
@@ -297,27 +307,22 @@ config.configFile(process.argv[2], function (config, oldConfig) {
 
       function build_hash(type){
         return function(group){
-          if (graphServiceIs("librato-metrics")){
-            stat = stats["gauges"];
-          }
           var hash = {};
           hash[type] = {};
           _.each(group,function(metric){
             hash[type][metric] = stats[type][metric];
           });
-          if (graphServiceIs("librato-metrics")){
-            hash["measure_time"] = ts
-          }
           return hash;
         };
       }
 
-      function hash_postprocess(inhash){
-        if (graphServiceIs("librato-metrics")){
+      function hash_postprocess(inhash,service){
+        if (service == "librato-metrics"){
           var hash = {};
           hash["gauges"] = inhash["gauges"] || {};
           if (_.include(_.keys(inhash),"counters")) {
             _.each(_.keys(inhash["counters"]),function(metric){
+                metric = metric.replace(/[^-.:_\w]+/, '_').substr(0,255)
                 hash["gauges"][metric] = inhash["counters"][metric];
                 });
           }
@@ -330,37 +335,39 @@ config.configFile(process.argv[2], function (config, oldConfig) {
         }
       }
 
-      function build_string(hash,type){
+      function build_string(hash,type,service){
           var stats_str ='';
 
-          if (graphServiceIs("librato-metrics")){
-            stats_str = JSON.stringify(hash);
-          } else {
-            for (key in hash[type]){
-              if (graphServiceIs("librato-metrics")){
-                k =       key.replace(/[^-.:_\w]+/, '_').substr(0,255)
-              } else {
+          switch(service){
+            case "librato-metrics":
+              stats_str = JSON.stringify(hash);
+              break;
+            case "graphite":
+              for (key in hash[type]){
                 k =       key
                           .replace(/\s+/g, '_')
                           .replace(/\//g, '-')
                           .replace(/[^a-zA-Z_\-0-9\.]/g, '');
-              }
 
-              var stat = hash[type][k];
-              if (type == "counters"){
-                if(k == 'numStats'){
-                  stats_str += 'statsd.numStats ' + stat['value'] + ' ' + ts + "\n";
+                var stat = hash[type][k];
+                if (type == "counters"){
+                  if(k == 'numStats'){
+                    stats_str += 'statsd.numStats ' + stat['value'] + ' ' + ts + "\n";
+                  } else {
+                    var per_interval_value = stat["value"] / (flushInterval / 1000);
+                    stats_str += ('stats.' + k + ' ' + per_interval_value + ' ' + ts + "\n");
+                    stats_str += ('stats_counts.' + k + ' ' + stat["value"] + ' ' + ts + "\n");
+                  }
                 } else {
-                  var per_interval_value = stat["value"] / (flushInterval / 1000);
-                  stats_str += ('stats.' + k + ' ' + per_interval_value + ' ' + ts + "\n");
-                  stats_str += ('stats_counts.' + k + ' ' + stat["value"] + ' ' + ts + "\n");
-                }
-              } else {
-                for (s in stat){
-                  stats_str += ('stats.timers.' + k + '.' + s + ' ' + stat[s] + ' ' + ts + "\n");
+                  for (s in stat){
+                    stats_str += ('stats.timers.' + k + '.' + s + ' ' + stat[s] + ' ' + ts + "\n");
+                  }
                 }
               }
-            }
+              break;
+            default:
+              throw ("'" + service + "' isn't a valid graphing service!");
+              break;
           }
           return stats_str;
       };
@@ -424,7 +431,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
                 submit_to_librato(stats_str,false);
               }, Math.floor(flushInterval/2) + 100);
             } else {
-              lokger(syslog.LOG_CRIT, "Error connecting to Librato!\n" + errdata);
+              logger("Error connecting to Librato!\n" + errdata,"crit");
             }
         });
       }
@@ -435,44 +442,58 @@ config.configFile(process.argv[2], function (config, oldConfig) {
           cb();
           },concurrent_conns);
 
+      // only send to what is enabled
+      var availableServices = ["graphite","librato-metrics"];
+      var enabledServices = _.select(availableServices,graphServiceEnabled);
+
       _.each(combined_hashes,function(hash){
         _.each(_.keys(hash), function(hashtype) { /* 'gauges' and 'counters' */
-          if (graphServiceIs("librato-metrics")){
-            var stats_str = build_string(hash_postprocess(hash),hashtype)
-            submissionq.push(function(){
-              if (config.debug) {
-                logger(stats_str,"debug");
-                logger(stats_str.length,"debug");
-              }
-              submit_to_librato(stats_str,true);
-            }, logerror);
-          } else {
-            var stats_str = build_string(hash_postprocess(hash),hashtype)
-            submissionq.push(function(){
-              if (config.debug) {
-                logger(stats_str,"debug");
-                logger(stats_str.length,"debug");
-              }
+          _.each(enabledServices,function(service) {
 
-              try {
-                var graphite = net.createConnection(config.graphitePort, config.graphiteHost);
-                graphite.addListener('error', function(connectionException){
+            var stats_str = build_string(hash_postprocess(hash,service),hashtype,service);
+
+            switch(service){
+              case "librato-metrics":
+                submissionq.push(function(){
                   if (config.debug) {
-                    logger(connectionException,"crit");
+                    logger(stats_str,"debug");
+                    logger(stats_str.length,"debug");
                   }
-                });
-                graphite.on('connect', function() {
-                  this.write(stats_str);
-                  this.end();
-                  globalstats['graphite']['last_flush'] = Math.round(new Date().getTime() / 1000);
-                  });
-              } catch(e){
-                if (config.debug) {
-                  logger(e,"debug");
-                }
-              }
-            }, logerror);
-          }
+                  submit_to_librato(stats_str,true);
+                }, logerror);
+                break;
+              case "graphite":
+                submissionq.push(function(){
+                  if (config.debug) {
+                    logger(stats_str,"debug");
+                    logger(stats_str.length,"debug");
+                  }
+
+                  try {
+                    var graphite = net.createConnection(config.graphitePort, config.graphiteHost);
+                    graphite.addListener('error', function(connectionException){
+                      if (config.debug) {
+                        logger(connectionException,"crit");
+                      }
+                    });
+                    graphite.on('connect', function() {
+                      this.write(stats_str);
+                      this.end();
+                      globalstats['graphite']['last_flush'] = Math.round(new Date().getTime() / 1000);
+                      });
+                  } catch(e){
+                    if (config.debug) {
+                      logger(e,"debug");
+                    }
+                  }
+                }, logerror);
+                break;
+
+              default:
+                throw ("'" + service + "' isn't a valid graphing service!");
+                break;
+            }
+          });
         });
       });
     }, flushInterval);

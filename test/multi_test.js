@@ -1,6 +1,10 @@
+// this file tests that graphite and librato work simultaneously
+
 var fs           = require('fs'),
+    net          = require('net'),
     temp         = require('temp'),
     spawn        = require('child_process').spawn,
+    sys          = require('util'),
     urlparse     = require('url').parse,
     _            = require('underscore'),
     dgram        = require('dgram'),
@@ -38,17 +42,16 @@ var statsd_send = function(data,sock,host,port,cb){
 // keep collecting data until a specified timeout period has elapsed
 // this will let us capture all data chunks so we don't miss one
 var collect_for = function(server,timeout,cb){
+  console.log("acceptin'");
   var received = [];
   var in_flight = 0;
   var start_time = new Date().getTime();
   var collector = function(req,res){
-    res.writeHead(204);
-    res.end();
     in_flight += 1;
     var body = '';
     req.on('data',function(data){ body += data; });
     req.on('end',function(){
-      received = received.concat(body);
+      received = received.concat(body.split("\n"));
       in_flight -= 1;
       if((in_flight < 1) && (new Date().getTime() > (start_time + timeout))){
           server.removeListener('request',collector);
@@ -58,18 +61,19 @@ var collect_for = function(server,timeout,cb){
   }
 
   setTimeout(function (){
-    server.removeListener('request',collector);
+    server.removeListener('connection',collector);
     if((in_flight < 1)){
       cb(received);
     }
   },timeout);
 
-  server.on('request',collector);
+  server.on('connection',collector);
 }
 
 module.exports = {
   setUp: function (callback) {
-    this.testport = 31337;
+    this.graphiteTestport = 31336;
+    this.libratoTestport = 31337;
 
     this.myflush = 200;
     var configfile = "{\n\
@@ -81,10 +85,14 @@ module.exports = {
                ,  libratoUser: \"test@librato.com\"\n\
                ,  libratoSnap: 10\n\
                ,  libratoApiKey: \"fakekey\"\n\
-               ,  libratoHost: \"http://127.0.0.1:" + this.testport + "\"}";
+               ,  libratoHost: \"http://127.0.0.1:" + this.libratoTestport + "\" \n\
+               ,  graphitePort: " + this.graphiteTestport + "\n\
+               ,  graphiteHost: \"127.0.0.1\"}";
 
-    this.acceptor = http.createServer();
-    this.acceptor.listen(this.testport);
+    this.graphiteAcceptor = net.createServer();
+    this.graphiteAcceptor.listen(this.graphiteTestport);
+    this.libratoAcceptor = http.createServer();
+    this.libratoAcceptor.listen(this.libratoTestport);
     this.sock = dgram.createSocket('udp4');
 
     this.server_up = true;
@@ -124,7 +132,8 @@ module.exports = {
   },
   tearDown: function (callback) {
     this.sock.close();
-    this.acceptor.close();
+    this.graphiteAcceptor.close();
+    this.libratoAcceptor.close();
     this.ok_to_die = true;
     if(this.server_up){
       this.exit_callback_callback = callback;
@@ -135,10 +144,38 @@ module.exports = {
   },
 
   send_well_formed_posts: function (test) {
-    test.expect(5);
+    test.expect(7);
+
+    // only call test.done() when both graphite and librato have finished
+    var protocols_hit = 0;
+    var finish_protocol = function(){
+      protocols_hit++;
+      console.log("protocol now: " + protocols_hit);
+      if(protocols_hit >= 2){
+        console.log("yeah buddy protocol now: " + protocols_hit);
+        test.done();
+      }
+    }
 
     // we should integrate a timeout into this
-    this.acceptor.once('request',function(req,res){
+    this.graphiteAcceptor.once('connection',function(c){
+      var body = '';
+      c.on('data',function(d){ body += d; });
+      c.on('end',function(){
+        var rows = body.split("\n");
+        var entries = _.map(rows, function(x) {
+          var chunks = x.split(' ');
+          var data = {};
+          data[chunks[0]] = chunks[1];
+          return data;
+        });
+        test.ok(_.include(_.map(entries,function(x) { return _.keys(x)[0] }),'statsd.numStats'),'graphite output includes numStats');
+        test.equal(_.find(entries, function(x) { return _.keys(x)[0] == 'statsd.numStats' })['statsd.numStats'],0);
+        finish_protocol();
+      });
+    });
+
+    this.libratoAcceptor.once('request',function(req,res){
         res.writeHead(204);
         res.end();
         test.equals(req.method,'POST');
@@ -164,70 +201,8 @@ module.exports = {
           } else {
             test.ok('false', 'API does not send numStats properly');
           }
-          test.done();
+          finish_protocol();
         });
-    });
-  },
-
-  timers_are_valid: function (test) {
-    test.expect(3);
-
-    var testvalue = 100;
-    var me = this;
-    this.acceptor.once('request',function(req,res){
-      res.writeHead(204);
-      res.end();
-      statsd_send('a_test_value:' + testvalue + '|ms',me.sock,'127.0.0.1',8125,function(){
-          collect_for(me.acceptor,me.myflush*2,function(strings){
-            test.ok(strings.length > 0,'should receive some data');
-            var hashes = _.map(strings,function(str){ return JSON.parse(str); });
-            var numstat_test = function(post){
-              return _.include(_.keys(post),'gauges') && _.include(_.keys(post['gauges']),'numStats') &&
-              _.include(_.keys(post['gauges']['numStats']),'value') &&
-              (post['gauges']['numStats']['value'] == 1);
-            };
-            test.ok(_.any(hashes,numstat_test), 'numStats should be 1');
-
-            var testvalue_test = function(post){
-              return _.include(_.keys(post),'gauges') && _.include(_.keys(post['gauges']),'a_test_value') &&
-              _.include(_.keys(post['gauges']['a_test_value']),'sum') &&
-              (post['gauges']['a_test_value']['sum'] == testvalue);
-            };
-            test.ok(_.any(hashes,testvalue_test), 'testvalue should be ' + testvalue);
-            test.done();
-          });
-      });
-    });
-  },
-
-  counts_are_valid: function (test) {
-    test.expect(3);
-
-    var testvalue = 100;
-    var me = this;
-    this.acceptor.once('request',function(req,res){
-      res.writeHead(204);
-      res.end();
-      statsd_send('a_test_value:' + testvalue + '|c',me.sock,'127.0.0.1',8125,function(){
-          collect_for(me.acceptor,me.myflush*2,function(strings){
-            test.ok(strings.length > 0,'should receive some data');
-            var hashes = _.map(strings,function(str){ return JSON.parse(str); });
-            var numstat_test = function(post){
-              return _.include(_.keys(post),'gauges') && _.include(_.keys(post['gauges']),'numStats') &&
-              _.include(_.keys(post['gauges']['numStats']),'value') &&
-              (post['gauges']['numStats']['value'] == 1);
-            };
-            test.ok(_.any(hashes,numstat_test), 'numStats should be 1');
-
-            var testvalue_test = function(post){
-              return _.include(_.keys(post),'gauges') && _.include(_.keys(post['gauges']),'a_test_value') &&
-              _.include(_.keys(post['gauges']['a_test_value']),'value') &&
-              (post['gauges']['a_test_value']['value'] == testvalue);
-            };
-            test.ok(_.any(hashes,testvalue_test), 'testvalue should be ' + testvalue);
-            test.done();
-          });
-      });
     });
   }
 }

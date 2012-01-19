@@ -71,8 +71,8 @@ module.exports = {
   setUp: function (callback) {
     this.testport = 31337;
     this.myflush = 200;
-    var configfile = "{graphService: \"graphite\"\n\
-               ,  batch: 200 \n\
+    var configfile = "{\n\
+                 batch: 200 \n\
                ,  flushInterval: " + this.myflush + " \n\
                ,  port: 8125\n\
                ,  dumpMessages: false \n\
