@@ -112,11 +112,13 @@ The stats output currently will give you:
 Installation and Configuration
 ------------------------------
 
- * Install node.js
- * Install the 'async', 'temp', 'node-syslog', 'nodeunit' and 'underscore' packages via [npm][npm] (if 'node-syslog' doesn't build for you, try this [workaround](https://gist.github.com/1632460))
- * Clone the project
- * Create a config file from exampleConfig.js and put it somewhere
- * Add connection info for your graphing service to exampleConfig.js
+ * Clone the project and `cd` into it
+ * Install node.js, preferably using [nvm][nvm]. >= 0.4.x is supported, but the latest node is preferred
+ * Ensure [npm][npm] is operational; new nodes have it built-in
+ * Run `npm install` to automatically install package dependencies
+ * `package.json` doesn't allow specification of engine-dependent dependencies. If you are using node 0.6.x or higher, the 'node-syslog' package can be manually installed for syslog output. Run `npm install node-syslog` to do so. A [workaround](https://gist.github.com/1632460)) is available if 'syslog.h' errors are encountered.
+ * Duplicate 'exampleConfig.js' to a filename of your choice
+ * Add graphing service connection info to your config file (multiple services can be enabled simultaneously)
  * Start the Daemon:
 
 ```
@@ -128,7 +130,7 @@ Tests
 
 A test framework has been added using node-unit and some custom code to start and manipulate statsd. Please add tests under test/ for any new features or bug fixes encountered. Testing a live server can be tricky, attempts were made to eliminate race considions but it may be possible to encounter a stuck state. If doing dev work, a `killall node` will kill any stray test servers in the background (don't do this on a production machine!).
 
-Tests can be executd with `./run_tests.sh`.
+Tests can be executed with `./run_tests.sh`.
 
 Inspiration
 -----------
@@ -160,6 +162,7 @@ We'll do our best to get your changes in!
 [node]: http://nodejs.org
 [udp]: http://enwp.org/udp
 [npm]: http://npmjs.org
+[nvm]: https://github.com/creationix/nvm
 
 
 Contributors
