@@ -35,8 +35,8 @@ Optional Variables:
                       [%, default: 90]
   batch:            split up large updates to Graphite/Librato into batches
                       of size N [default: 200]
-
 */
+
 {
     port: 8125
   , graphitePort: 2003

@@ -42,7 +42,6 @@ var statsd_send = function(data,sock,host,port,cb){
 // keep collecting data until a specified timeout period has elapsed
 // this will let us capture all data chunks so we don't miss one
 var collect_for = function(server,timeout,cb){
-  console.log("acceptin'");
   var received = [];
   var in_flight = 0;
   var start_time = new Date().getTime();
@@ -150,9 +149,7 @@ module.exports = {
     var protocols_hit = 0;
     var finish_protocol = function(){
       protocols_hit++;
-      console.log("protocol now: " + protocols_hit);
       if(protocols_hit >= 2){
-        console.log("yeah buddy protocol now: " + protocols_hit);
         test.done();
       }
     }

@@ -1,4 +1,4 @@
-versionstring = "statsd-librato/1.5"
+versionstring = "statsd-librato/1.6"
 
 var dgram      = require('dgram')
   , sys        = require('util')
@@ -317,21 +317,24 @@ config.configFile(process.argv[2], function (config, oldConfig) {
       }
 
       function hash_postprocess(inhash,service){
-        if (service == "librato-metrics"){
-          var hash = {};
-          hash["gauges"] = inhash["gauges"] || {};
-          if (_.include(_.keys(inhash),"counters")) {
-            _.each(_.keys(inhash["counters"]),function(metric){
-                metric = metric.replace(/[^-.:_\w]+/, '_').substr(0,255)
-                hash["gauges"][metric] = inhash["counters"][metric];
-                });
-          }
-          snap = config.libratoSnap || 10;
-          hash["measure_time"] = (ts - (ts%snap));
-          if (config.libratoSource) { hash["source"] = config.libratoSource; }
-          return hash;
-        } else {
-          return inhash;
+        switch(service){
+          case "librato-metrics":
+            var hash = {};
+            hash["gauges"] = inhash["gauges"] || {};
+            if (_.include(_.keys(inhash),"counters")) {
+              _.each(_.keys(inhash["counters"]),function(metric){
+                  metric = metric.replace(/[^-.:_\w]+/, '_').substr(0,255)
+                  hash["gauges"][metric] = inhash["counters"][metric];
+                  });
+            }
+            snap = config.libratoSnap || 10;
+            hash["measure_time"] = (ts - (ts%snap));
+            if (config.libratoSource) { hash["source"] = config.libratoSource; }
+            return hash;
+            break;
+          default:
+            return inhash;
+            break;
         }
       }
 
