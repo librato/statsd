@@ -143,7 +143,7 @@ module.exports = {
         res.end();
         test.equals(req.method,'POST');
         var uri_parts = urlparse(req.url);
-        test.equals(uri_parts["pathname"],'/v1/metrics.json')
+        test.equals(uri_parts["pathname"],'/v1/metrics')
         var body = '';
         req.on('data',function(data){ body += data; });
         req.on('end',function(){

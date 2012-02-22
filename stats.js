@@ -396,7 +396,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
         var options = {
           host: parsed_host["hostname"],
           port: parsed_host["port"] || 443,
-          path: '/v1/metrics.json',
+          path: '/v1/metrics',
           method: 'POST',
           headers: {
             "Authorization": 'Basic ' + new Buffer(config.libratoUser + ':' + config.libratoApiKey).toString('base64'),
