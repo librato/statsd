@@ -13,6 +13,21 @@ Graphite Required Variables:
   graphiteHost:     hostname or IP of Graphite server
   graphitePort:     port of Graphite server
 
+Librato Metrics Required Variables:
+
+(These are loaded if the 'librato' backend is added to the 'backends'
+ variable.)
+
+ All Librato options are specified in the 'librato' hash:
+
+  librato : {
+    email:  Email address of your Librato Metrics account (req'd)
+    token:  API Token of your Librato Metrics account (req'd)
+    source: Source name to use for metrics from this statsd (opt)
+    legacyCounters: Send counters as gauges (default false). Models
+                    old behavior of the Librato statsd fork.
+  }
+
 Optional Variables:
 
   backends:         an array of backends to load. Each backend must exist

@@ -79,6 +79,10 @@ StatsD supports the following backends:
   time-series data store that provides visualization through a
   web-browser interface.
 
+* [Librato Metrics][librato] (`librato`): Librato Metrics is a hosted
+  time-series data service that provides dashboard visualizations and
+  threshold alerts, among other features.
+
 By default, the `graphite` backend will be loaded automatically. To
 select which backends are loaded, set the `backends` configuration
 variable to the list of backend modules to load. Each backend module
@@ -220,6 +224,7 @@ fork StatsD from here: http://github.com/etsy/statsd
 We'll do our best to get your changes in!
 
 [graphite]: http://graphite.wikidot.com
+[librato]: https://metrics.librato.com
 [etsy]: http://www.etsy.com
 [blog post]: http://codeascraft.etsy.com/2011/02/15/measure-anything-measure-everything/
 [node]: http://nodejs.org
