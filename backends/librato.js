@@ -12,6 +12,10 @@
  *    "email" : Email address of your Librato Metrics account (req'd)
  *    "token" : API Token of your Librato Metrics accounts    (req'd)
  *    "sourceName" : Name of a source to use for metrics (optional)
+ *    "legacyCounters": Boolean on whether or not all counters should be
+ *                      reported as gauges, as was originally done with
+ *                      Librato's statsd. Defaults to false which means
+ *                      counters will be published as native Metrics counters.
  *  }
  */
 
@@ -29,6 +33,10 @@ var retryDelay = 5;
 var libratoStats = {};
 var basicAuthHeader;
 var flushInterval;
+
+// Previous versions treated counters as gauges, support
+// a legacy mode to let users transition.
+var legacyCounters = false;
 
 // Statsd counters reset, we want monotonically increasing
 // counters.
@@ -129,6 +137,12 @@ var flush_stats = function(ts, metrics)
   var gauges = [];
 
   for (key in metrics.counters) {
+    if (legacyCounters) {
+      gauges.push({name: sanitize_name(key),
+                   value: metrics.counters[key]});
+      continue;
+    }
+
     if (!libratoCounters[key]) {
       libratoCounters[key] = {value: metrics.counters[key],
                               lastUpdate: ts};
@@ -181,16 +195,21 @@ var flush_stats = function(ts, metrics)
 
   numStats = gauges.length + counters.length;
 
-  if (libratoCounters['numStats']) {
-    libratoCounters['numStats'].value += numStats;
-    libratoCounters['numStats'].lastUpdate = ts;
+  if (legacyCounters) {
+    gauges.push({name: 'numStats',
+                 value: numStats});
   } else {
-    libratoCounters['numStats'] = {value: numStats,
-                                   lastUpdate: ts};
-  }
+    if (libratoCounters['numStats']) {
+      libratoCounters['numStats'].value += numStats;
+      libratoCounters['numStats'].lastUpdate = ts;
+    } else {
+      libratoCounters['numStats'] = {value: numStats,
+                                     lastUpdate: ts};
+    }
 
-  counters.push({name: 'numStats',
-                 value: libratoCounters['numStats'].value});
+    counters.push({name: 'numStats',
+                   value: libratoCounters['numStats'].value});
+  }
 
   post_metrics(ts, gauges, counters);
 
@@ -231,6 +250,7 @@ var init_librato = function(startup_time, config)
     email = config.librato.email;
     token = config.librato.token;
     sourceName = config.librato.source;
+    legacyCounters = config.librato.legacyCounters;
   } else {
     // Fall back to deprecated top-level config variables
     api = config.libratoHost;
