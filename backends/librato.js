@@ -12,7 +12,7 @@
  *    "email" : Email address of your Librato Metrics account (req'd)
  *    "token" : API Token of your Librato Metrics accounts    (req'd)
  *    "source": Name of a source to use for metrics (optional)
- *    "snap"  : Lock timestamps to this interval in seconds (optional)
+ *    "snapTime" : Lock timestamps to this interval in seconds (optional)
  *    "countersAsGauges": Boolean on whether or not all counters should be
  *                        reported as gauges, as was originally done with
  *                        Librato's statsd. Defaults to false which means

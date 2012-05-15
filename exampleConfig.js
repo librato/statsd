@@ -24,7 +24,7 @@ Librato Metrics Required Variables:
     email:  Email address of your Librato Metrics account (req'd)
     token:  API Token of your Librato Metrics account (req'd)
     source: Source name to use for metrics from this statsd (opt)
-    snap:   Snap timestamps to this interval in seconds (opt)
+    snapTime: Snap timestamps to this interval in seconds (opt)
     countersAsGauges: Send counters as gauges (default false). Models
                       old behavior of the Librato statsd fork.
   }
