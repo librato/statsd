@@ -12,6 +12,7 @@
  *    "email" : Email address of your Librato Metrics account (req'd)
  *    "token" : API Token of your Librato Metrics accounts    (req'd)
  *    "source": Name of a source to use for metrics (optional)
+ *    "snap"  : Lock timestamps to this interval in seconds (optional)
  *    "countersAsGauges": Boolean on whether or not all counters should be
  *                        reported as gauges, as was originally done with
  *                        Librato's statsd. Defaults to false which means
@@ -41,6 +42,9 @@ var libratoStats = {};
 var userAgent;
 var basicAuthHeader;
 var flushInterval;
+
+// What epoch interval to align time stamps to (defaults to flush interval)
+var snapTime = null;
 
 // Previous versions treated counters as gauges, support
 // a legacy mode to let users transition.
@@ -140,6 +144,11 @@ var flush_stats = function librato_flush(ts, metrics)
   var key;
   var counters = [];
   var gauges = [];
+  var measureTime = ts;
+
+  if (snapTime) {
+    measureTime = Math.floor(ts / snapTime) * snapTime;
+  }
 
   for (key in metrics.counters) {
     if (countersAsGauges) {
@@ -216,7 +225,7 @@ var flush_stats = function librato_flush(ts, metrics)
                    value: libratoCounters['numStats'].value});
   }
 
-  post_metrics(ts, gauges, counters);
+  post_metrics(measureTime, gauges, counters);
 
   // Delete any counters that were not published, as they
   // were deleted.
@@ -274,6 +283,7 @@ exports.init = function librato_init(startup_time, config, events)
     token = config.librato.token;
     sourceName = config.librato.source;
     countersAsGauges = config.librato.countersAsGauges;
+    snapTime = config.librato.snapTime;
   } else {
     // XXX: Previous versions of the librato/statsd client would read
     // all configuration variables from the top-level of the configuration
@@ -284,6 +294,7 @@ exports.init = function librato_init(startup_time, config, events)
     email = config.libratoUser;
     token = config.libratoApiKey;
     sourceName = config.libratoSource;
+    snapTime = config.libratoSnap;
 
     // Detected old configuration, provide least surprise for users by
     // sending counters in as gauges.
@@ -296,6 +307,10 @@ exports.init = function librato_init(startup_time, config, events)
   }
 
   flushInterval = config.flushInterval;
+
+  if (!snapTime) {
+    snapTime = Math.floor(flushInterval / 1000);
+  }
 
   userAgent = build_user_agent();
   basicAuthHeader = build_basic_auth(email, token);
