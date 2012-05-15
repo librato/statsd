@@ -43,6 +43,9 @@ var userAgent;
 var basicAuthHeader;
 var flushInterval;
 
+// Maximum measurements we send in a single post
+var maxBatchSize = 500;
+
 // What epoch interval to align time stamps to (defaults to flush interval)
 var snapTime = null;
 
@@ -140,7 +143,7 @@ var sanitize_name = function(name)
 
 var flush_stats = function librato_flush(ts, metrics)
 {
-  var numStats = 0;
+  var numStats = 0, statCount;
   var key;
   var counters = [];
   var gauges = [];
@@ -150,10 +153,27 @@ var flush_stats = function librato_flush(ts, metrics)
     measureTime = Math.floor(ts / snapTime) * snapTime;
   }
 
+  var addMeasure = function add_measure(mType, measure) {
+    if (mType == 'counter') {
+      counters.push(measure);
+    } else {
+      gauges.push(measure);
+    }
+
+    numStats += 1;
+
+    // Post measurements and clear arrays if past batch size
+    if (counters.length + gauges.length >= maxBatchSize) {
+      post_metrics(measureTime, gauges, counters);
+      gauges = [];
+      counters = [];
+    }
+  };
+
   for (key in metrics.counters) {
     if (countersAsGauges) {
-      gauges.push({name: sanitize_name(key),
-                   value: metrics.counters[key]});
+      addMeasure('gauge', { name: sanitize_name(key),
+                            value: metrics.counters[key]});
       continue;
     }
 
@@ -165,8 +185,8 @@ var flush_stats = function librato_flush(ts, metrics)
       libratoCounters[key].lastUpdate = ts;
     }
 
-    counters.push({name: sanitize_name(key),
-                   value: libratoCounters[key].value});
+    addMeasure('counter', { name: sanitize_name(key),
+                            value: libratoCounters[key].value});
   }
 
   for (key in metrics.timers) {
@@ -199,33 +219,35 @@ var flush_stats = function librato_flush(ts, metrics)
       max: max
     };
 
-    gauges.push(gauge);
+    addMeasure('gauge', gauge);
   }
 
   for (key in metrics.gauges) {
-    gauges.push({name: sanitize_name(key),
-                 value: metrics.gauges[key]});
+    addMeasure('gauge', { name: sanitize_name(key),
+                          value: metrics.gauges[key]});
   }
 
-  numStats = gauges.length + counters.length;
+  statCount = numStats;
 
   if (countersAsGauges) {
-    gauges.push({name: 'numStats',
-                 value: numStats});
+    addMeasure('gauge', { name: 'numStats',
+                          value: statCount});
   } else {
     if (libratoCounters['numStats']) {
-      libratoCounters['numStats'].value += numStats;
+      libratoCounters['numStats'].value += statCount;
       libratoCounters['numStats'].lastUpdate = ts;
     } else {
-      libratoCounters['numStats'] = {value: numStats,
+      libratoCounters['numStats'] = {value: statCount,
                                      lastUpdate: ts};
     }
 
-    counters.push({name: 'numStats',
-                   value: libratoCounters['numStats'].value});
+    addMeasure('counter', { name: 'numStats',
+                            value: libratoCounters['numStats'].value});
   }
 
-  post_metrics(measureTime, gauges, counters);
+  if (gauges.length > 0 || counters.length > 0) {
+    post_metrics(measureTime, gauges, counters);
+  }
 
   // Delete any counters that were not published, as they
   // were deleted.
@@ -284,6 +306,9 @@ exports.init = function librato_init(startup_time, config, events)
     sourceName = config.librato.source;
     countersAsGauges = config.librato.countersAsGauges;
     snapTime = config.librato.snapTime;
+    if (config.librato.batchSize) {
+      maxBatchSize = config.librato.batchSize;
+    }
   } else {
     // XXX: Previous versions of the librato/statsd client would read
     // all configuration variables from the top-level of the configuration
